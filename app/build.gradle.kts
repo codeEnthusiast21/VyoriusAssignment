@@ -49,5 +49,6 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    implementation(libs.libvlc.all)
-}
+        implementation ("org.videolan.android:libvlc-all:3.5.1")
+
+    }
