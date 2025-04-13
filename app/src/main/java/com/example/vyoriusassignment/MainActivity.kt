@@ -1,6 +1,7 @@
 package com.example.vyoriusassignment
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -13,6 +14,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
@@ -31,11 +33,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recordButton: Button
     private lateinit var pipButton: Button
 
+    private val streamViewModel: StreamViewModel by viewModels()
+
     private var isPlaying = false
     private var isRecording = false
 
     companion object {
         private const val TAG = "MainActivity"
+        const val EXTRA_STREAM_URL = "stream_url"
+        const val EXTRA_STREAM_POSITION = "stream_position"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,7 +128,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         pipButton.setOnClickListener {
-            if (isPlaying) enterPipMode() else {
+            if (isPlaying) startPiPActivity() else {  // Changed from enterPipMode() to startPiPActivity()
                 Toast.makeText(this, "Start streaming first", Toast.LENGTH_SHORT).show()
             }
         }
@@ -249,4 +255,49 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error releasing resources: ${e.message}", e)
         }
     }
+    private fun startPiPActivity() {
+        if (!isPlaying) {
+            Toast.makeText(this, "Start streaming first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val position = mediaPlayer.time
+            val url = urlEditText.text.toString().trim()
+
+            streamViewModel.apply {
+                currentUrl = url
+                isPlaying = true
+                mediaPosition = position
+            }
+
+            val intent = Intent(this, PipActivity::class.java).apply {
+                putExtra(EXTRA_STREAM_URL, url)
+                putExtra(EXTRA_STREAM_POSITION, position)
+            }
+            startActivity(intent)
+
+            // Stop current playback
+            mediaPlayer.stop()
+            mediaPlayer.detachViews()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting PiP activity: ${e.message}", e)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.let {
+            if (streamViewModel.isPlaying) {
+                // Resume playback from PiP activity
+                val url = streamViewModel.currentUrl
+                val position = streamViewModel.mediaPosition
+
+                urlEditText.setText(url)
+                startStream()
+                mediaPlayer.time = position
+            }
+        }
+    }
+
 }
