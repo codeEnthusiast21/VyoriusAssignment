@@ -3,10 +3,13 @@ package com.example.vyoriusassignment
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Rational
 import android.view.SurfaceView
@@ -23,6 +26,8 @@ import org.videolan.libvlc.util.VLCVideoLayout
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.text.compareTo
+import kotlin.toString
 
 class MainActivity : AppCompatActivity() {
     private lateinit var libVlc: LibVLC
@@ -32,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playButton: Button
     private lateinit var recordButton: Button
     private lateinit var pipButton: Button
+    private var isInPipMode = false
 
     private val streamViewModel: StreamViewModel by viewModels()
 
@@ -39,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private var isRecording = false
 
     companion object {
+        private const val PIP_REQUEST_CODE = 101
+
         private const val TAG = "MainActivity"
         const val EXTRA_STREAM_URL = "stream_url"
         const val EXTRA_STREAM_POSITION = "stream_position"
@@ -128,49 +136,69 @@ class MainActivity : AppCompatActivity() {
         }
 
         pipButton.setOnClickListener {
-            if (isPlaying) startPiPActivity() else {  // Changed from enterPipMode() to startPiPActivity()
+            if (isPlaying) {
+                minimizeToPiP()
+            } else {
                 Toast.makeText(this, "Start streaming first", Toast.LENGTH_SHORT).show()
             }
         }
     }
+    private fun minimizeToPiP() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                // Save current playback state
+                streamViewModel.apply {
+                    currentUrl = urlEditText.text.toString().trim()
+                    isPlaying = true
+                    mediaPosition = mediaPlayer.time
+                }
+
+                // Enter PiP mode
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build()
+                enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error entering PiP mode: ${e.message}", e)
+                Toast.makeText(this, "Failed to enter PiP mode", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
 
     private fun startStream() {
         val url = urlEditText.text.toString().trim()
         if (url.isEmpty()) {
-            Toast.makeText(this, "Please enter RTSP URL", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Please enter URL", Toast.LENGTH_SHORT).show()
             return
         }
 
         try {
-            // Release any existing media
-            mediaPlayer.stop()
-            mediaPlayer.detachViews()
-
             val media = Media(libVlc, Uri.parse(url))
-            media.setHWDecoderEnabled(true, false)
+            media.setHWDecoderEnabled(true, true)
 
-            // Add media options
-            media.addOption(":network-caching=100")
+            // Optimize for lower latency
+            media.addOption(":network-caching=50")
             media.addOption(":rtsp-tcp")
-            media.addOption(":rtsp-frame-buffer-size=500000")
+            media.addOption(":rtsp-frame-buffer-size=100000")
             media.addOption(":clock-jitter=0")
-            media.addOption(":clock-synchro=0")
+            media.addOption(":live-caching=0")
+            media.addOption(":file-caching=0")
 
             mediaPlayer.media = media
             media.release()
 
-            mediaPlayer.attachViews(videoLayout, null, false, false)
+            mediaPlayer.attachViews(videoLayout, null, true, false)
             mediaPlayer.play()
 
-            Log.d(TAG, "Starting stream: $url")
-            Toast.makeText(this, "Connecting to stream...", Toast.LENGTH_SHORT).show()
+            isPlaying = true
+            playButton.text = "Stop"
 
         } catch (e: Exception) {
             Log.e(TAG, "Error starting stream: ${e.message}", e)
-            handlePlaybackError()
+            Toast.makeText(this, "Error starting stream", Toast.LENGTH_SHORT).show()
         }
     }
-
     private fun stopStream() {
         try {
             mediaPlayer.stop()
@@ -227,25 +255,40 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error stopping recording: ${e.message}", e)
         }
     }
-
-    private fun enterPipMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                val params = PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build()
-                enterPictureInPictureMode(params)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error entering PiP mode: ${e.message}", e)
-            }
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (isInPipMode) {
+            // Adjust video layout for PiP mode if needed
+            mediaPlayer.setVideoScale(MediaPlayer.ScaleType.SURFACE_FIT_SCREEN)
         }
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        videoLayout.visibility = if (isInPictureInPictureMode) View.VISIBLE else View.GONE
+        isInPipMode = isInPictureInPictureMode
+
+        if (isInPictureInPictureMode) {
+            hideUIElements()
+
+        } else {
+            showUIElements()
+
+
+        }
+    }
+    private fun hideUIElements() {
+        urlEditText.visibility = View.GONE
+        playButton.visibility = View.GONE
+        recordButton.visibility = View.GONE
+        pipButton.visibility = View.GONE
     }
 
+    private fun showUIElements() {
+        urlEditText.visibility = View.VISIBLE
+        playButton.visibility = View.VISIBLE
+        recordButton.visibility = View.VISIBLE
+        pipButton.visibility = View.VISIBLE
+    }
     override fun onDestroy() {
         super.onDestroy()
         try {
@@ -255,48 +298,96 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error releasing resources: ${e.message}", e)
         }
     }
-    private fun startPiPActivity() {
-        if (!isPlaying) {
-            Toast.makeText(this, "Start streaming first", Toast.LENGTH_SHORT).show()
-            return
+    override fun onResume() {
+        super.onResume()
+        if (streamViewModel.isPlaying) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                resumePlayback()
+            }, 500)
         }
-
+    }
+    private fun resumePlayback() {
         try {
-            val position = mediaPlayer.time
-            val url = urlEditText.text.toString().trim()
+            val url = streamViewModel.currentUrl
+            val position = streamViewModel.mediaPosition
 
-            streamViewModel.apply {
-                currentUrl = url
-                isPlaying = true
-                mediaPosition = position
-            }
+            urlEditText.setText(url)
 
-            val intent = Intent(this, PipActivity::class.java).apply {
-                putExtra(EXTRA_STREAM_URL, url)
-                putExtra(EXTRA_STREAM_POSITION, position)
-            }
-            startActivity(intent)
-
-            // Stop current playback
+            // Stop any existing playback
             mediaPlayer.stop()
             mediaPlayer.detachViews()
+
+            // Create new media
+            val media = Media(libVlc, Uri.parse(url))
+            media.setHWDecoderEnabled(true, false)
+            media.addOption(":network-caching=100")
+            media.addOption(":rtsp-tcp")
+            media.addOption(":rtsp-frame-buffer-size=500000")
+
+            mediaPlayer.media = media
+            media.release()
+
+            // Attach views and play
+            mediaPlayer.attachViews(videoLayout, null, false, false)
+            mediaPlayer.play()
+            mediaPlayer.time = position
+
+            isPlaying = true
+            playButton.text = "Stop"
+
+            // Reset ViewModel state
+            streamViewModel.isPlaying = false
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting PiP activity: ${e.message}", e)
+            Log.e(TAG, "Error resuming playback: ${e.message}", e)
+            Toast.makeText(this, "Error resuming playback", Toast.LENGTH_SHORT).show()
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.let {
-            if (streamViewModel.isPlaying) {
-                // Resume playback from PiP activity
-                val url = streamViewModel.currentUrl
-                val position = streamViewModel.mediaPosition
+        setIntent(intent)
 
-                urlEditText.setText(url)
-                startStream()
-                mediaPlayer.time = position
-            }
+        if (intent.getBooleanExtra("RESUME_STREAM", false)) {
+            // Resume immediately without delay
+            val position = intent.getLongExtra("STREAM_POSITION", 0)
+            resumeStreamFromPip(position)
+        }
+    }
+    private fun resumeStreamFromPip(position: Long) {
+        try {
+            val url = streamViewModel.currentUrl
+            if (url.isEmpty()) return
+
+            urlEditText.setText(url)
+
+            val media = Media(libVlc, Uri.parse(url))
+            media.setHWDecoderEnabled(true, true)
+
+            // Optimized options for quick resumption
+            media.addOption(":network-caching=50")
+            media.addOption(":rtsp-tcp")
+            media.addOption(":rtsp-frame-buffer-size=100000")
+            media.addOption(":clock-jitter=0")
+            media.addOption(":live-caching=0")
+            media.addOption(":file-caching=0")
+
+            mediaPlayer.media = media
+            media.release()
+
+            mediaPlayer.attachViews(videoLayout, null, true, false)
+            mediaPlayer.play()
+            mediaPlayer.time = position
+
+            isPlaying = true
+            playButton.text = "Stop"
+
+            // Reset ViewModel state
+            streamViewModel.isPlaying = false
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resuming stream: ${e.message}", e)
+            Toast.makeText(this, "Error resuming stream", Toast.LENGTH_SHORT).show()
         }
     }
 
