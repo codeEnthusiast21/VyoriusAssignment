@@ -12,22 +12,26 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.util.Rational
-import android.view.SurfaceView
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import org.videolan.libvlc.LibVLC
-import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.text.compareTo
-import kotlin.toString
+import org.videolan.libvlc.interfaces.IMedia
+import android.Manifest
+import android.media.MediaScannerConnection
+import android.widget.TextView
+import org.videolan.libvlc.Media
+
 
 class MainActivity : AppCompatActivity() {
     private lateinit var libVlc: LibVLC
@@ -38,6 +42,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recordButton: Button
     private lateinit var pipButton: Button
     private var isInPipMode = false
+    private lateinit var timerText: TextView
+    private var timerHandler: Handler = Handler(Looper.getMainLooper())
+    private var timerRunnable: Runnable? = null
+    private var startTime: Long = 0
 
     private val streamViewModel: StreamViewModel by viewModels()
 
@@ -45,7 +53,8 @@ class MainActivity : AppCompatActivity() {
     private var isRecording = false
 
     companion object {
-        private const val PIP_REQUEST_CODE = 101
+        private const val RECORDINGS_DIR = "DCIM/StreamRecordings"
+
 
         private const val TAG = "MainActivity"
         const val EXTRA_STREAM_URL = "stream_url"
@@ -65,36 +74,35 @@ class MainActivity : AppCompatActivity() {
         playButton = findViewById(R.id.play_button)
         recordButton = findViewById(R.id.record_button)
         pipButton = findViewById(R.id.pip_button)
+        timerText = findViewById(R.id.timer_text)
 
         setupClickListeners()
     }
+    private fun startTimer() {
+        startTime = System.currentTimeMillis()
+        timerText.visibility = View.VISIBLE
 
-    private fun initPlayer() {
-        try {
-            val options = ArrayList<String>().apply {
-                add("-vvv") // verbose logging
-                add("--aout=opensles")
-                add("--audio-time-stretch")
-                add("--avcodec-skiploopfilter")
-                add("--avcodec-skip-frame")
-                add("--avcodec-skip-idct")
-                add("--rtsp-tcp")
-                add("--network-caching=100")
-                add("--live-caching=100")
-                add("--sout-mux-caching=100")
-                add("--clock-jitter=0")
-                add("--clock-synchro=0")
-                add("--no-audio")
+        timerRunnable = object : Runnable {
+            override fun run() {
+                val millis = System.currentTimeMillis() - startTime
+                val seconds = (millis / 1000).toInt()
+                val minutes = seconds / 60
+                val hours = minutes / 60
+
+                timerText.text = String.format("%02d:%02d:%02d",
+                    hours,
+                    minutes % 60,
+                    seconds % 60)
+
+                timerHandler.postDelayed(this, 1000)
             }
-
-            libVlc = LibVLC(this, options)
-            mediaPlayer = MediaPlayer(libVlc)
-            setupMediaPlayerEvents()
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error initializing player: ${e.message}", e)
-            Toast.makeText(this, "Failed to initialize player", Toast.LENGTH_SHORT).show()
         }
+        timerHandler.post(timerRunnable!!)
+    }
+
+    private fun stopTimer() {
+        timerRunnable?.let { timerHandler.removeCallbacks(it) }
+        timerText.visibility = View.GONE
     }
 
     private fun setupMediaPlayerEvents() {
@@ -125,7 +133,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
     private fun setupClickListeners() {
         playButton.setOnClickListener {
             if (!isPlaying) startStream() else stopStream()
@@ -143,6 +150,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
     private fun minimizeToPiP() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
@@ -164,41 +172,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-
-    private fun startStream() {
-        val url = urlEditText.text.toString().trim()
-        if (url.isEmpty()) {
-            Toast.makeText(this, "Please enter URL", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        try {
-            val media = Media(libVlc, Uri.parse(url))
-            media.setHWDecoderEnabled(true, true)
-
-            // Optimize for lower latency
-            media.addOption(":network-caching=50")
-            media.addOption(":rtsp-tcp")
-            media.addOption(":rtsp-frame-buffer-size=100000")
-            media.addOption(":clock-jitter=0")
-            media.addOption(":live-caching=0")
-            media.addOption(":file-caching=0")
-
-            mediaPlayer.media = media
-            media.release()
-
-            mediaPlayer.attachViews(videoLayout, null, true, false)
-            mediaPlayer.play()
-
-            isPlaying = true
-            playButton.text = "Stop"
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting stream: ${e.message}", e)
-            Toast.makeText(this, "Error starting stream", Toast.LENGTH_SHORT).show()
-        }
-    }
     private fun stopStream() {
         try {
             mediaPlayer.stop()
@@ -209,11 +182,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
     private fun handlePlaybackError() {
         Toast.makeText(this, "Playback error occurred", Toast.LENGTH_SHORT).show()
         resetPlayback()
     }
-
     private fun resetPlayback() {
         isPlaying = false
         playButton.text = "Play"
@@ -228,33 +201,209 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        if (!checkStoragePermission()) {
+            return
+        }
+
         try {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val recordingPath = "${getExternalFilesDir(Environment.DIRECTORY_MOVIES)}/Recording_$timestamp.mp4"
+            val storageDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+            val recordingsDir = File(storageDir, "StreamRecordings")
 
-            Log.d(TAG, "Starting recording to: $recordingPath")
-            mediaPlayer.record(recordingPath)
+            if (!recordingsDir.exists()) {
+                if (!recordingsDir.mkdirs()) {
+                    Toast.makeText(this, "Failed to create recordings directory", Toast.LENGTH_SHORT).show()
+                    return
+                }
+            }
+
+            val recordingFile = File(recordingsDir, "Recording_$timestamp.mp4")
+            val recordingPath = recordingFile.absolutePath
+            val currentUrl = urlEditText.text.toString().trim()
+
+            // Create new media for recording
+            val media = Media(libVlc, Uri.parse(currentUrl))
+            media.setHWDecoderEnabled(true, false)
+
+            // Optimized options for stable recording
+            val soutChain = "#transcode{" +
+                    "vcodec=h264," +
+                    "vb=2000," +
+                    "scale=1," +
+                    "acodec=mp4a," +
+                    "ab=128," +
+                    "channels=2," +
+                    "samplerate=44100" +
+                    "}:duplicate{dst=display,dst=std{access=file,mux=mp4,dst='$recordingPath'}}"
+
+            media.addOption(":sout=$soutChain")
+            media.addOption(":sout-keep")
+            media.addOption(":network-caching=1000")
+            media.addOption(":live-caching=1000")
+            media.addOption(":file-caching=1000")
+            media.addOption(":rtsp-tcp")
+            media.addOption(":rtsp-frame-buffer-size=1000000")
+            media.addOption(":clock-jitter=0")
+            media.addOption(":clock-synchro=0")
+
+            // Update media player
+            mediaPlayer.media = media
+            media.release()
+            mediaPlayer.play()
 
             isRecording = true
             recordButton.text = "Stop Recording"
+            startTimer()
             Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show()
 
         } catch (e: Exception) {
             Log.e(TAG, "Error starting recording: ${e.message}", e)
             Toast.makeText(this, "Failed to start recording", Toast.LENGTH_SHORT).show()
+            isRecording = false
+            recordButton.text = "Record"
+        }
+    }
+
+    private fun startStream() {
+        val url = urlEditText.text.toString().trim()
+        if (url.isEmpty()) {
+            Toast.makeText(this, "Please enter URL", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val media = Media(libVlc, Uri.parse(url))
+            media.setHWDecoderEnabled(true, false)
+
+            // Optimized streaming options
+            media.addOption(":network-caching=1000")
+            media.addOption(":live-caching=1000")
+            media.addOption(":file-caching=1000")
+            media.addOption(":rtsp-tcp")
+            media.addOption(":rtsp-frame-buffer-size=1000000")
+            media.addOption(":clock-jitter=0")
+            media.addOption(":clock-synchro=0")
+            media.addOption(":no-audio-time-stretch")
+            media.addOption(":fps=30")
+
+            mediaPlayer.media = media
+            media.release()
+
+            mediaPlayer.attachViews(videoLayout, null, false, false)
+            mediaPlayer.play()
+
+            isPlaying = true
+            playButton.text = "Stop"
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting stream: ${e.message}", e)
+            Toast.makeText(this, "Error starting stream", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun initPlayer() {
+        try {
+            val options = ArrayList<String>().apply {
+                add("--no-drop-late-frames")
+                add("--no-skip-frames")
+                add("--rtsp-tcp")
+                add("--network-caching=1000")
+                add("--live-caching=1000")
+                add("--file-caching=1000")
+                add("--clock-jitter=0")
+                add("--clock-synchro=0")
+                add("--rtsp-frame-buffer-size=1000000")
+                add("--no-audio-time-stretch")
+                add("--avcodec-fast")
+                add("--avcodec-threads=4")
+            }
+
+            libVlc = LibVLC(this, options)
+            mediaPlayer = MediaPlayer(libVlc)
+            mediaPlayer.setVideoScale(MediaPlayer.ScaleType.SURFACE_BEST_FIT)
+            setupMediaPlayerEvents()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing player: ${e.message}", e)
+            Toast.makeText(this, "Failed to initialize player", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun stopRecording() {
         try {
-            mediaPlayer.record(null)
+            val currentUrl = urlEditText.text.toString().trim()
+
+            // Stop recording
+            mediaPlayer.stop()
+            mediaPlayer.detachViews()
+
+            // Create new media for normal playback
+            val media = Media(libVlc, Uri.parse(currentUrl))
+            media.setHWDecoderEnabled(true, true)
+            media.addOption(":network-caching=1500")
+            media.addOption(":live-caching=1500")
+            media.addOption(":rtsp-tcp")
+
+            // Resume normal playback
+            mediaPlayer.media = media
+            media.release()
+            mediaPlayer.attachViews(videoLayout, null, false, false)
+            mediaPlayer.play()
+
             isRecording = false
             recordButton.text = "Record"
-            Toast.makeText(this, "Recording saved", Toast.LENGTH_SHORT).show()
+            stopTimer()
+
+            // Trigger media scan
+            val recordingsDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "StreamRecordings")
+            MediaScannerConnection.scanFile(
+                this,
+                arrayOf(recordingsDir.absolutePath),
+                null
+            ) { _, _ ->
+                runOnUiThread {
+                    Toast.makeText(this, "Recording saved in DCIM/StreamRecordings", Toast.LENGTH_SHORT).show()
+                }
+            }
+
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping recording: ${e.message}", e)
+            Toast.makeText(this, "Error stopping recording", Toast.LENGTH_SHORT).show()
         }
     }
+
+    private fun checkStoragePermission(): Boolean {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+            if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    1001
+                )
+                return false
+            }
+        }
+        return true
+    }
+
+
+    // Handle permission result
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startRecording()
+            } else {
+                Toast.makeText(this, "Storage permission required for recording", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (isInPipMode) {
@@ -294,6 +443,7 @@ class MainActivity : AppCompatActivity() {
         try {
             mediaPlayer.release()
             libVlc.release()
+            stopTimer()
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing resources: ${e.message}", e)
         }
