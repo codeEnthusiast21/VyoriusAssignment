@@ -219,36 +219,30 @@ class MainActivity : AppCompatActivity() {
 
             val recordingFile = File(recordingsDir, "Recording_$timestamp.mp4")
             val recordingPath = recordingFile.absolutePath
+
             val currentUrl = urlEditText.text.toString().trim()
 
-            // Create new media for recording
+            // Stop current playback
+            mediaPlayer.stop()
+            mediaPlayer.detachViews()
+
+            // Create new media with recording configuration
             val media = Media(libVlc, Uri.parse(currentUrl))
-            media.setHWDecoderEnabled(true, false)
+            media.setHWDecoderEnabled(true, true)
 
-            // Optimized options for stable recording
-            val soutChain = "#transcode{" +
-                    "vcodec=h264," +
-                    "vb=2000," +
-                    "scale=1," +
-                    "acodec=mp4a," +
-                    "ab=128," +
-                    "channels=2," +
-                    "samplerate=44100" +
-                    "}:duplicate{dst=display,dst=std{access=file,mux=mp4,dst='$recordingPath'}}"
-
-            media.addOption(":sout=$soutChain")
-            media.addOption(":sout-keep")
-            media.addOption(":network-caching=1000")
-            media.addOption(":live-caching=1000")
-            media.addOption(":file-caching=1000")
+            // Set media options
+            media.addOption(":network-caching=1500")
+            media.addOption(":live-caching=1500")
             media.addOption(":rtsp-tcp")
-            media.addOption(":rtsp-frame-buffer-size=1000000")
-            media.addOption(":clock-jitter=0")
-            media.addOption(":clock-synchro=0")
+            media.addOption(":sout=#duplicate{dst=display,dst=file{dst='$recordingPath',mux=mp4}}")
+            media.addOption(":sout-all")
+            media.addOption(":sout-keep")
 
-            // Update media player
+            // Set media and start playback
             mediaPlayer.media = media
             media.release()
+
+            mediaPlayer.attachViews(videoLayout, null, false, false)
             mediaPlayer.play()
 
             isRecording = true
@@ -273,23 +267,19 @@ class MainActivity : AppCompatActivity() {
 
         try {
             val media = Media(libVlc, Uri.parse(url))
-            media.setHWDecoderEnabled(true, false)
-
-            // Optimized streaming options
-            media.addOption(":network-caching=1000")
-            media.addOption(":live-caching=1000")
-            media.addOption(":file-caching=1000")
+            media.setHWDecoderEnabled(true, true)
+            // Optimize for lower latency
+            media.addOption(":network-caching=300")
             media.addOption(":rtsp-tcp")
-            media.addOption(":rtsp-frame-buffer-size=1000000")
+            media.addOption(":rtsp-frame-buffer-size=500000")
             media.addOption(":clock-jitter=0")
-            media.addOption(":clock-synchro=0")
-            media.addOption(":no-audio-time-stretch")
-            media.addOption(":fps=30")
+            media.addOption(":live-caching=300")
+            media.addOption(":file-caching=300")
 
             mediaPlayer.media = media
             media.release()
 
-            mediaPlayer.attachViews(videoLayout, null, false, false)
+            mediaPlayer.attachViews(videoLayout, null, true, false)
             mediaPlayer.play()
 
             isPlaying = true
@@ -307,20 +297,16 @@ class MainActivity : AppCompatActivity() {
                 add("--no-drop-late-frames")
                 add("--no-skip-frames")
                 add("--rtsp-tcp")
-                add("--network-caching=1000")
-                add("--live-caching=1000")
-                add("--file-caching=1000")
+                add("--network-caching=300")
+                add("--live-caching=300")
+                add("--file-caching=300")
                 add("--clock-jitter=0")
                 add("--clock-synchro=0")
-                add("--rtsp-frame-buffer-size=1000000")
-                add("--no-audio-time-stretch")
-                add("--avcodec-fast")
-                add("--avcodec-threads=4")
+                add("--rtsp-frame-buffer-size=500000")
             }
 
             libVlc = LibVLC(this, options)
             mediaPlayer = MediaPlayer(libVlc)
-            mediaPlayer.setVideoScale(MediaPlayer.ScaleType.SURFACE_BEST_FIT)
             setupMediaPlayerEvents()
 
         } catch (e: Exception) {
