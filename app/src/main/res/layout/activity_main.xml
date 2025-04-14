@@ -1,39 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#F5F5F5"
-    android:padding="16dp">
+    android:background="#121212">
 
     <androidx.cardview.widget.CardView
+        android:id="@+id/url_card"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:elevation="4dp"
-        android:layout_marginBottom="16dp">
+        android:layout_margin="16dp"
+        app:cardCornerRadius="8dp"
+        app:cardBackgroundColor="#1E1E1E"
+        app:cardElevation="4dp">
 
         <EditText
             android:id="@+id/url_edit_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:background="@null"
             android:hint="Enter RTSP URL"
             android:padding="16dp"
-            android:background="@null"
+            android:textColorHint="#9E9E9E"
+            android:textColor="#FFFFFF"
             android:inputType="textUri" />
     </androidx.cardview.widget.CardView>
 
+    <androidx.cardview.widget.CardView
+        android:id="@+id/timer_card"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/url_card"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="16dp"
+        app:cardCornerRadius="8dp"
+        app:cardBackgroundColor="#1E1E1E"
+        app:cardElevation="4dp">
+
+        <TextView
+            android:id="@+id/timer_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:padding="8dp"
+            android:textColor="#FF5252"
+            android:textSize="20sp"
+            android:visibility="gone"
+            android:text="00:00:00" />
+    </androidx.cardview.widget.CardView>
+
     <LinearLayout
+        android:id="@+id/buttons_layout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="16dp">
+        android:layout_below="@id/timer_card"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="16dp"
+        android:orientation="horizontal">
 
         <Button
             android:id="@+id/play_button"
             android:layout_width="0dp"
             android:layout_height="48dp"
-            android:layout_weight="1"
             android:layout_marginEnd="8dp"
+            android:layout_weight="1"
             android:background="@drawable/custom_button_background"
             android:textColor="#FFFFFF"
             android:text="Play" />
@@ -42,8 +72,8 @@
             android:id="@+id/record_button"
             android:layout_width="0dp"
             android:layout_height="48dp"
-            android:layout_weight="1"
             android:layout_marginEnd="8dp"
+            android:layout_weight="1"
             android:background="@drawable/record_button_background"
             android:textColor="#FFFFFF"
             android:text="Record" />
@@ -58,40 +88,11 @@
             android:text="PiP" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/timer_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:textSize="20sp"
-        android:fontFamily="monospace"
-        android:textColor="#D32F2F"
-        android:visibility="gone"
-        android:layout_marginBottom="16dp"
-        android:text="00:00:00" />
-
-    <FrameLayout
+    <org.videolan.libvlc.util.VLCVideoLayout
+        android:id="@+id/video_layout"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@android:color/black">
+        android:layout_height="match_parent"
+        android:layout_below="@id/buttons_layout"
+        android:background="@android:color/black" />
 
-        <org.videolan.libvlc.util.VLCVideoLayout
-            android:id="@+id/video_layout"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-        <TextView
-            android:id="@+id/pip_overlay"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="PiP Mode On"
-            android:textColor="#FFFFFF"
-            android:background="#80000000"
-            android:padding="8dp"
-            android:layout_gravity="center"
-            android:visibility="gone"
-            android:textSize="16sp"
-            android:elevation="4dp" />
-    </FrameLayout>
-</LinearLayout>
+</RelativeLayout>

@@ -151,27 +151,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun minimizeToPiP() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                // Save current playback state
-                streamViewModel.apply {
-                    currentUrl = urlEditText.text.toString().trim()
-                    isPlaying = true
-                    mediaPosition = mediaPlayer.time
-                }
-
-                // Enter PiP mode
-                val params = PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build()
-                enterPictureInPictureMode(params)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error entering PiP mode: ${e.message}", e)
-                Toast.makeText(this, "Failed to enter PiP mode", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
     private fun stopStream() {
         try {
             mediaPlayer.stop()
@@ -181,12 +160,12 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Error stopping stream: ${e.message}", e)
         }
     }
-
-
     private fun handlePlaybackError() {
         Toast.makeText(this, "Playback error occurred", Toast.LENGTH_SHORT).show()
         resetPlayback()
     }
+
+
     private fun resetPlayback() {
         isPlaying = false
         playButton.text = "Play"
@@ -194,7 +173,6 @@ class MainActivity : AppCompatActivity() {
             stopRecording()
         }
     }
-
     private fun startRecording() {
         if (!isPlaying) {
             Toast.makeText(this, "Start streaming first", Toast.LENGTH_SHORT).show()
@@ -372,7 +350,6 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-
     // Handle permission result
     override fun onRequestPermissionsResult(
         requestCode: Int,
@@ -398,17 +375,42 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private fun minimizeToPiP() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                // Save current playback state
+                streamViewModel.apply {
+                    currentUrl = urlEditText.text.toString().trim()
+                    isPlaying = true
+                    mediaPosition = mediaPlayer.time
+                }
+
+                // Set optimal video scale before entering PiP
+                mediaPlayer.setVideoScale(MediaPlayer.ScaleType.SURFACE_FILL)
+
+                // Enter PiP mode with fixed 16:9 ratio
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build()
+                enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error entering PiP mode: ${e.message}", e)
+                Toast.makeText(this, "Failed to enter PiP mode", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
         isInPipMode = isInPictureInPictureMode
 
         if (isInPictureInPictureMode) {
             hideUIElements()
-
+            mediaPlayer.setVideoScale(MediaPlayer.ScaleType.SURFACE_FILL)
         } else {
             showUIElements()
-
-
+            mediaPlayer.setVideoScale(MediaPlayer.ScaleType.SURFACE_BEST_FIT)
         }
     }
     private fun hideUIElements() {
